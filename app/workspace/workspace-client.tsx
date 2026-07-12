@@ -22,6 +22,7 @@ import { Wordmark } from "@/components/brand";
 import { OforaBrand } from "@/components/brand/ofora-brand";
 import { Button } from "@/components/ui/button";
 import { AGENT_PRICE_CENTS, AGENT_PRICES, formatUsdcCents, ORCHESTRATION_MARGIN, SAFETY_DISCLAIMER, SPECIALIST_SPEND, SYNTHETIC_CASE_NOTICE, USER_PRICE } from "@/lib/constants";
+import { clearPersistedReports, loadLatestPersistedReport, PERSISTED_REPORT_STORAGE_PREFIX, savePersistedReport } from "@/lib/reports/persisted-report";
 import type { AgentName, AgentRun, OrchestrationRun, TenderPacketInput } from "@/lib/schemas/ofora";
 import { cn, formatElapsed, shortId } from "@/lib/utils";
 import {
@@ -87,6 +88,7 @@ export function WorkspaceClient({ tenderPacket, demoMode, envStatus }: Props) {
   const [agents, setAgents] = useState<AgentRun[]>(initialAgents);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedReceiptCount, setSavedReceiptCount] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const animationTimers = useRef<number[]>([]);
 
@@ -114,11 +116,24 @@ export function WorkspaceClient({ tenderPacket, demoMode, envStatus }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!envStatus.policyLockLiveEnabled || run || loading) return;
-    const recoveredState = parseSafeRecoveredRunState(window.localStorage.getItem(SAFE_RECOVERED_RUN_STORAGE_KEY));
-    if (!recoveredState) return;
-    setRun(recoveredState.run);
-    setAgents(recoveredState.run.agents);
+    setSavedReceiptCount(countSavedDemoReceipts());
+  }, []);
+
+  useEffect(() => {
+    if (run || loading) return;
+    if (envStatus.policyLockLiveEnabled) {
+      const recoveredState = parseSafeRecoveredRunState(window.localStorage.getItem(SAFE_RECOVERED_RUN_STORAGE_KEY));
+      if (recoveredState) {
+        setRun(recoveredState.run);
+        setAgents(recoveredState.run.agents);
+        setError(null);
+        return;
+      }
+    }
+    const persistedReport = loadLatestPersistedReport(window.localStorage);
+    if (!persistedReport) return;
+    setRun(persistedReport.run);
+    setAgents(persistedReport.run.agents);
     setError(null);
   }, [envStatus.policyLockLiveEnabled, loading, run]);
 
@@ -127,6 +142,12 @@ export function WorkspaceClient({ tenderPacket, demoMode, envStatus }: Props) {
     if (!recoveredState) return;
     window.localStorage.setItem(SAFE_RECOVERED_RUN_STORAGE_KEY, serializeSafeRecoveredRunState(recoveredState));
   }, [run]);
+
+  useEffect(() => {
+    if (!run || run.status !== "completed" || !hasValidReceipt(run)) return;
+    const saved = savePersistedReport(window.localStorage, run, tenderPacket);
+    if (saved) setSavedReceiptCount(countSavedDemoReceipts());
+  }, [run, tenderPacket]);
 
   async function startRun() {
     if (livePreflightIssue) {
@@ -185,6 +206,11 @@ export function WorkspaceClient({ tenderPacket, demoMode, envStatus }: Props) {
     setAgents(initialAgents);
     setError(null);
     setLoading(false);
+  }
+
+  function clearSavedDemoReceipts() {
+    const removed = clearPersistedReports(window.localStorage);
+    if (removed > 0) setSavedReceiptCount(countSavedDemoReceipts());
   }
 
   function goToView(view: WorkspaceView) {
@@ -260,7 +286,7 @@ export function WorkspaceClient({ tenderPacket, demoMode, envStatus }: Props) {
             {activeView === "Suppliers" ? <SuppliersView tender={tenderPacket} /> : null}
             {activeView === "Receipts" ? <ReceiptsView tender={tenderPacket} agents={displayAgents} demoMode={demoMode} liveAgentNames={envStatus.liveAgentNames} policyLockLiveEnabled={envStatus.policyLockLiveEnabled} realReceiptCount={realReceiptCount} run={run} /> : null}
             {activeView === "Audit Boundaries" ? <AuditBoundariesView /> : null}
-            {activeView === "Settings" ? <SettingsView envStatus={envStatus} run={run} onClearRecoveredRun={clearRecoveredRun} /> : null}
+            {activeView === "Settings" ? <SettingsView envStatus={envStatus} run={run} savedReceiptCount={savedReceiptCount} onClearRecoveredRun={clearRecoveredRun} onClearSavedDemoReceipts={clearSavedDemoReceipts} /> : null}
           </main>
         </div>
       </div>
@@ -544,7 +570,19 @@ function AuditBoundariesView() {
   );
 }
 
-function SettingsView({ envStatus, run, onClearRecoveredRun }: { envStatus: EnvStatus; run: OrchestrationRun | null; onClearRecoveredRun: () => void }) {
+function SettingsView({
+  envStatus,
+  run,
+  savedReceiptCount,
+  onClearRecoveredRun,
+  onClearSavedDemoReceipts
+}: {
+  envStatus: EnvStatus;
+  run: OrchestrationRun | null;
+  savedReceiptCount: number;
+  onClearRecoveredRun: () => void;
+  onClearSavedDemoReceipts: () => void;
+}) {
   const demoMode = envStatus.demoMode;
   const recovered = Boolean(run?.runId.startsWith("recovered-"));
   return (
@@ -576,6 +614,16 @@ function SettingsView({ envStatus, run, onClearRecoveredRun }: { envStatus: EnvS
           </p>
           <Button type="button" variant="secondary" onClick={onClearRecoveredRun} disabled={!recovered} className="border-ofora-border bg-white text-ofora-ink hover:bg-ofora-mist">
             Clear recovered run
+          </Button>
+        </div>
+      </Panel>
+      <Panel title="Saved demo receipts" icon={Settings} eyebrow="Browser report fallback" showIcon={false}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="max-w-2xl text-sm leading-6 text-ofora-muted">
+            Clear only browser-saved Fair Award Receipt fallbacks. This removes `ofora-agents:report:*` keys and does not modify CROO orders, payments, delivery records, or blockchain references.
+          </p>
+          <Button type="button" variant="secondary" onClick={onClearSavedDemoReceipts} disabled={savedReceiptCount === 0} className="border-ofora-border bg-white text-ofora-ink hover:bg-ofora-mist">
+            Clear saved demo receipts
           </Button>
         </div>
       </Panel>
@@ -989,6 +1037,14 @@ function getFailedDisplayAgent(agent: AgentRun, run: OrchestrationRun | null): A
 function clearAnimationTimers(timers: number[]) {
   timers.forEach((timer) => window.clearTimeout(timer));
   timers.length = 0;
+}
+
+function countSavedDemoReceipts() {
+  let count = 0;
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    if (window.localStorage.key(index)?.startsWith(PERSISTED_REPORT_STORAGE_PREFIX)) count += 1;
+  }
+  return count;
 }
 
 function hasValidAward(run: OrchestrationRun | null) {
