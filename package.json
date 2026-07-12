@@ -14,7 +14,8 @@
     "provider:risk": "node --env-file=.env.local --import tsx scripts/providers/supplier-risk.ts",
     "provider:award": "node --env-file=.env.local --import tsx scripts/providers/award-verifier.ts",
     "provider:receipt": "node --env-file=.env.local --import tsx scripts/providers/receipt-writer.ts",
-    "recover:policy": "node --env-file=.env.local --import tsx scripts/recover-policy-lock-order.ts"
+    "recover:policy": "node --env-file=.env.local --import tsx scripts/recover-policy-lock-order.ts",
+    "provider:all:cloud": "sh -c 'node --import tsx scripts/providers/policy-lock.ts & node --import tsx scripts/providers/bid-normalizer.ts & node --import tsx scripts/providers/supplier-risk.ts & wait'"
   },
   "dependencies": {
     "@croo-network/sdk": "latest",
@@ -28,19 +29,19 @@
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.0.1",
     "tailwindcss-animate": "^1.0.7",
-    "zod": "^3.24.2"
+    "zod": "^3.24.2",
+    "tsx": "^4.23.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
+    "autoprefixer": "^10.4.20",
     "eslint": "^9.20.1",
     "eslint-config-next": "^15.1.7",
-    "autoprefixer": "^10.4.20",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
 }
